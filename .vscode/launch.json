@@ -1,0 +1,50 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "debug train gsplat",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/main.py",
+            "args": [
+                "fit",
+                "--config", "configs/gsplat.yaml",
+                "--data.path", "data/asknerf_pot_burner_orange_2/colmap/dense",
+                "-n", "pot_burner_orange",
+                "-v", "gsplat"
+            ],
+            "console": "integratedTerminal",
+            "justMyCode": true,
+            "env": {}
+        },
+        {
+            "name": "debug sam masks",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/utils/get_sam_masks.py",
+            "args": [
+                "data/asknerf_pot_burner_orange_2/images",
+            ],
+            "console": "integratedTerminal",
+            "justMyCode": true,
+            "env": {}
+        },
+        {
+            "name": "debug seganygs",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/seganygs.py",
+            "args": [
+                "fit",
+                "--config", "configs/segany_splatting.yaml",
+                "--data.path", "data/asknerf_pot_burner_orange_2/colmap/dense",
+                "--model.initialize_from", "outputs/pot_burner_orange/gsplat",
+                "-n", "pot_burner_orange",
+                "-v", "seganygs"
+            ],
+            "console": "integratedTerminal",
+            "justMyCode": true,
+            "env": {}
+        },
+    ]
+}

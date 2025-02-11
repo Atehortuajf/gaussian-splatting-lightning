@@ -152,6 +152,8 @@ class Vanilla2DGSRenderer(Renderer):
             [0, 0, 0, 1]]).float().cuda().T
         projection_matrix = c2w.T @ view.full_projection
         intrins = (projection_matrix @ ndc2pix)[:3, :3].T
+        if intrins.dtype != torch.float32:
+            intrins = intrins.float()
 
         grid_x, grid_y = torch.meshgrid(torch.arange(W, device='cuda').float(), torch.arange(H, device='cuda').float(), indexing='xy')
         points = torch.stack([grid_x, grid_y, torch.ones_like(grid_x)], dim=-1).reshape(-1, 3)

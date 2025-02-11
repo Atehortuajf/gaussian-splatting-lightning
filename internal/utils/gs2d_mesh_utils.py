@@ -9,6 +9,8 @@ import trimesh
 import open3d as o3d
 from skimage import measure
 from tqdm.auto import tqdm
+from lang_sam import LangSAM
+from PIL import Image
 
 
 class GS2DMeshUtils:
@@ -279,7 +281,7 @@ class GS2DMeshUtils:
         voxel_size=0.004,
         sdf_trunc=0.02,
         depth_trunc=3,
-        mask_backgrond=False,
+        ims_path=None,
     ):
         """
         Perform TSDF fusion given a fixed depth range, used in the paper.
@@ -287,7 +289,7 @@ class GS2DMeshUtils:
         voxel_size: the voxel size of the volume
         sdf_trunc: truncation value
         depth_trunc: maximum depth range, should depended on the scene's scales
-        mask_backgrond: whether to mask backgroud, only works when the dataset have masks
+        masks: mesh masks, if provided, will be used to mask out the background
 
         return o3d.mesh
         """
@@ -304,14 +306,46 @@ class GS2DMeshUtils:
             color_type=o3d.pipelines.integration.TSDFVolumeColorType.RGB8
         )
 
+        volume_grasp = o3d.pipelines.integration.ScalableTSDFVolume(
+            voxel_length=voxel_size,
+            sdf_trunc=sdf_trunc,
+            color_type=o3d.pipelines.integration.TSDFVolumeColorType.RGB8
+        )
+
+        obj_query = ["vase"]
+        grasp_query = ["vase handle"]
+        print("Loading LangSAM model ...")
+        sam_model = LangSAM()
+
         with tqdm(enumerate(cls.to_cam_open3d(cameras)), total=len(cameras), desc="TSDF integration progress") as t:
             for i, cam_o3d in t:
+                if i % (len(cameras) // 10) != 0:
+                    continue
                 rgb = rgbmaps[i]
                 depth = depthmaps[i]
+                gt_im = Image.open(ims_path[i]).convert("RGB")
+                obj_seg = sam_model.predict([gt_im], obj_query)
 
-                # if we have mask provided, use it
-                assert mask_backgrond is False
-                # if mask_backgrond and (self.viewpoint_stack[i].gt_alpha_mask is not None):
+                mask_idx = obj_seg[0]['mask_scores'].argmax()
+                depth[(np.expand_dims(obj_seg[0]['masks'][mask_idx], 0) < 0.5)] = 0
+
+                grasp_seg = sam_model.predict([gt_im], grasp_query)
+                grasp_depth = depth.clone()
+                mean = 1.0
+                grasp_mask_idx = -1
+                for i in range(len(grasp_seg[0]['masks'])):
+                    if grasp_seg[0]['masks'].ndim < 3:
+                        grasp_seg[0]['masks'] = np.expand_dims(grasp_seg[0]['masks'], 0)
+                        break
+                    if grasp_seg[0]['masks'][i].mean() < mean:
+                        mean = grasp_seg[0]['masks'][i].mean() # super jank, the submask is usually the smallest
+                        grasp_mask_idx = i
+                if grasp_mask_idx >= 0:
+                    grasp_depth[(np.expand_dims(grasp_seg[0]['masks'][grasp_mask_idx], 0) < 0.5)] = 0
+                else:
+                    print(grasp_seg[0]['masks'].shape)
+                    grasp_depth[True] = 0 
+                    #depth[(masks[i] < 0.5)] = 0
                 #     depth[(self.viewpoint_stack[i].gt_alpha_mask < 0.5)] = 0
 
                 # make open3d rgbd
@@ -322,10 +356,19 @@ class GS2DMeshUtils:
                     depth_scale=1.0
                 )
 
+                rgbd_grasp = o3d.geometry.RGBDImage.create_from_color_and_depth(
+                    o3d.geometry.Image(np.asarray(np.clip(rgb.permute(1, 2, 0).cpu().numpy(), 0.0, 1.0) * 255, order="C", dtype=np.uint8)),
+                    o3d.geometry.Image(np.asarray(grasp_depth.permute(1, 2, 0).cpu().numpy(), order="C")),
+                    depth_trunc=depth_trunc, convert_rgb_to_intensity=False,
+                    depth_scale=1.0
+                )
+
                 volume.integrate(rgbd, intrinsic=cam_o3d.intrinsic, extrinsic=cam_o3d.extrinsic)
+                volume_grasp.integrate(rgbd_grasp, intrinsic=cam_o3d.intrinsic, extrinsic=cam_o3d.extrinsic)
 
         mesh = volume.extract_triangle_mesh()
-        return mesh
+        grasp_mesh = volume_grasp.extract_triangle_mesh()
+        return mesh, grasp_mesh
 
 
 def post_process_mesh(mesh, cluster_to_keep=1000):

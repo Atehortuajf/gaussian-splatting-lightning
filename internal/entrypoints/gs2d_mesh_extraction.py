@@ -3,6 +3,8 @@ import os
 import torch
 import open3d as o3d
 from jsonargparse import CLI
+from PIL import Image
+import numpy as np
 from internal.utils.gaussian_model_loader import GaussianModelLoader
 from internal.utils.gs2d_mesh_utils import GS2DMeshUtils, post_process_mesh
 
@@ -88,7 +90,9 @@ def main():
         output_path=os.getcwd(),
         global_rank=0,
     ).get_outputs()
+
     cameras = [i.to_device(device) for i in dataparser_outputs.train_set.cameras]
+    ims_path = [i for i in dataparser_outputs.train_set.image_paths]
 
     # set the active_sh to 0 to export only diffuse texture
     model.active_sh_degree = 0
@@ -106,12 +110,12 @@ def main():
             resolution=args.mesh_res,
         )
     else:
-        name = 'fuse.ply'
+        name = 'fuse.obj'
         _, radius = bound
         depth_trunc = (radius * 2.0) if args.depth_trunc < 0 else args.depth_trunc
         voxel_size = (depth_trunc / args.mesh_res) if args.voxel_size < 0 else args.voxel_size
         sdf_trunc = 5.0 * voxel_size if args.sdf_trunc < 0 else args.sdf_trunc
-        mesh = GS2DMeshUtils.extract_mesh_bounded(maps=maps, cameras=cameras, voxel_size=voxel_size, sdf_trunc=sdf_trunc, depth_trunc=depth_trunc)
+        mesh, grasp_mesh = GS2DMeshUtils.extract_mesh_bounded(maps=maps, cameras=cameras, voxel_size=voxel_size*2, sdf_trunc=sdf_trunc, depth_trunc=depth_trunc, ims_path=ims_path)
 
     output_dir = args.model_path
     if os.path.isfile(output_dir):
@@ -122,5 +126,7 @@ def main():
     # post-process the mesh and save, saving the largest N clusters
     print("post-processing...")
     mesh_post = post_process_mesh(mesh, cluster_to_keep=args.num_cluster)
-    o3d.io.write_triangle_mesh(os.path.join(output_dir, name.replace('.ply', '_post.ply')), mesh_post)
-    print("mesh post processed saved at {}".format(os.path.join(output_dir, name.replace('.ply', '_post.ply'))))
+    clean_grasp = post_process_mesh(grasp_mesh, cluster_to_keep=args.num_cluster)
+    o3d.io.write_triangle_mesh(os.path.join(output_dir, name.replace('.obj', '_post.obj')), mesh_post)
+    o3d.io.write_triangle_mesh(os.path.join(output_dir, name.replace('.obj', '_grasp.obj')), clean_grasp)
+    print("mesh post processed saved at {}".format(os.path.join(output_dir, name.replace('.obj', '_post.obj'))))

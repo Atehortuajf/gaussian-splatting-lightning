@@ -5,4 +5,6 @@ renders
 edited
 clusters
 segments
+data
 **/__pycache__
+*.pth
